@@ -154,7 +154,7 @@ proc main()
 
     t  += dt;
     it += 1;
-    //writeln(it,"  ",t);
+    writeln(it,"  ",t);
 
     if it%si == 0 then c = savesol(t, u, c);
   }
