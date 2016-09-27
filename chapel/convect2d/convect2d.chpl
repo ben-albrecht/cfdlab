@@ -19,9 +19,17 @@ config const n  = 50,   // number of cells in each direction
              si = 100;  // iteration interval to save solution
 const xmin = 0.0, xmax = 1.0,
       ymin = 0.0, ymax = 1.0;
+
+const dx = (xmax-xmin)/n,
+      dy = (ymax-ymin)/n;
+
+  const D  = {1..n, 1..n},
+        D1 = {1..(n+1), 1..n},
+        D2 = {1..n, 1..(n+1)};
+
 const ark : [1..3] real = [0.0, 3.0/4.0, 1.0/3.0];
 const brk = 1.0 - ark;
-var dx, dy : real;
+
 
 /* fv weno5 reconstruction, gives left state at interface b/w u0 and u1 */
 proc weno5(um2:real, um1:real, u0:real, up1:real, up2:real): real
@@ -46,25 +54,26 @@ proc weno5(um2:real, um1:real, u0:real, up1:real, up2:real): real
                ((1.0/3.0)*u0 + (5.0/6.0)*up1 - (1.0/6.0)*up2)
              );
 
-   return +reduce (w*u) / +reduce w;
+   return (w(1)*u(1) + w(2)*u(2) + w(3)*u(3)) / (w(1) + w(2) + w(3));
 }
 
 /* Save solution to file */
-proc savesol(t : real, u : [?D] real, c : int, dx : real, dy : real) : int
+proc savesol(t : real, u : [?D] real, c : int) : int
 {
   if c > 999 {
     halt("Filename counter too large !!!");
   }
 
   // construct filename with counter c
-  var filename = "sol%03i.tec".format(c);
+  var filename = "sol0%03i.tec".format(c);
 
   var fw = open(filename, iomode.cw).writer();
   fw.writeln("TITLE = \"u_t + u_x + u_y = 0\"");
   fw.writeln("VARIABLES = x, y, sol");
   fw.writeln("ZONE STRANDID=1, SOLUTIONTIME=",t,", I=",n,", J=",n,", DATAPACKING=POINT");
 
-  for (i, j) in zip(1..n, 1..n) {
+
+  for (j,i) in D {
     const x = xmin + (i-1)*dx + 0.5*dx,
           y = ymin + (j-1)*dy + 0.5*dy;
     fw.writeln(x,"  ",y,"  ",u[i,j]);
@@ -76,14 +85,11 @@ proc savesol(t : real, u : [?D] real, c : int, dx : real, dy : real) : int
 /* main function */
 proc main()
 {
-  const dx = (xmax-xmin)/n,
-        dy = (ymax-ymin)/n;
 
   writeln("Grid size is ",n," x ",n);
   writeln("dx, dy =", dx, dy);
 
-  const dom = {1..n, 1..n};
-  param rank = dom.rank;
+  param rank = D.rank;
 
   var halo1, halo3 : rank*int;
   for i in 1..rank {
@@ -91,8 +97,8 @@ proc main()
     halo3(i) = 3;
   }
 
-  const  Space = dom dmapped Stencil(dom, fluff=halo1, periodic=false);
-  const PSpace = dom dmapped Stencil(dom, fluff=halo3, periodic=true);
+  //const  Space = D dmapped Stencil(D, fluff=halo1, periodic=false);
+  const PSpace = D dmapped Stencil(D, fluff=halo3, periodic=true);
 
   var u : [PSpace] real;
 
@@ -106,7 +112,7 @@ proc main()
   u.updateFluff();
 
   var c  = 0;     // counter to save solution
-  c = savesol(0.0, u, c, dx, dy);
+  c = savesol(0.0, u, c);
 
   var u0 : [PSpace] real;
   var res: [PSpace] real;
@@ -116,6 +122,7 @@ proc main()
   var t  = 0.0;   // time counter
   var it = 0;     // iteration counter
   const lam = dt/(dx*dy);
+
   while t < Tf
   {
     // Adjust dt so we exactly reach Tf
@@ -128,14 +135,14 @@ proc main()
     {
       res = 0.0;
       // x fluxes
-      forall (i,j) in zip(1..(n+1),1..n)
+      forall (i,j) in D1
       {
         const ul = weno5(u[i-3,j],u[i-2,j],u[i-1,j],u[i,j],u[i+1,j]);
         res[i-1,j] += ul * dy;
         res[i,j]   -= ul * dy;
       }
       // y fluxes
-      forall (i,j) in zip(1..n,1..(n+1))
+      forall (i,j) in D2
       {
         const ul = weno5(u[i,j-3],u[i,j-2],u[i,j-1],u[i,j],u[i,j+1]);
         res[i,j-1] += ul * dx;
@@ -147,10 +154,10 @@ proc main()
 
     t  += dt;
     it += 1;
-    writeln(it,"  ",t);
+    //writeln(it,"  ",t);
 
-    if it%si == 0 then c = savesol(t, u, c, dx, dy);
+    if it%si == 0 then c = savesol(t, u, c);
   }
 
-  c = savesol(t, u, c, dx, dy);
+  c = savesol(t, u, c);
 }
